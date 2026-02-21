@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Log Details | Ramadan Split{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Day {{ log_row.day_number }} - {{ log_row.meal_type }} ({{ log_row.log_date }})</h4>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Back</a>
+</div>
+
+<div class="card p-3">
+  {% for item in order_breakdown %}
+    <div class="border rounded p-3 mb-3">
+      <div class="d-flex justify-content-between">
+        <div>
+          <h6 class="mb-1">{{ item.order.item_name }}</h6>
+          <small class="text-muted">Paid by: {{ item.order.payer_name }}</small>
+        </div>
+        <strong>Rs {{ '%.2f'|format(item.order.actual_price) }}</strong>
+      </div>
+      <hr>
+      <div class="row g-2">
+        {% for c in item.consumers %}
+          <div class="col-6 col-md-3">
+            <div class="bg-light rounded p-2">
+              <small class="d-block text-muted">{{ c.name }}</small>
+              <strong>Rs {{ '%.2f'|format(c.share_amount) }}</strong>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% else %}
+    <p class="text-muted mb-0">No items recorded for this meal.</p>
+  {% endfor %}
+</div>
+{% endblock %}
