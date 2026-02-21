@@ -2,7 +2,6 @@ import json
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from flask import Flask, flash, g, redirect, render_template, request, url_for
 
@@ -18,6 +17,7 @@ GROUP_USERS = ["Me", "Israr", "Ahmed", "Arfat", "Mustfain"]
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = "dev-change-this-secret-in-production"
+    app.config["DATABASE"] = str(DATABASE_PATH)
 
     @app.before_request
     def before_request() -> None:
@@ -77,12 +77,10 @@ def create_app() -> Flask:
     @app.route("/log/new", methods=["GET", "POST"])
     def new_log():
         db = get_db()
-        users = rows_to_dicts(db.execute("SELECT id, name FROM users ORDER BY id").fetchall())
-        catalog_items = rows_to_dicts(
-            db.execute(
-                "SELECT id, name, default_price, category FROM catalog_items ORDER BY name"
-            ).fetchall()
-        )
+        users = db.execute("SELECT id, name FROM users ORDER BY id").fetchall()
+        catalog_items = db.execute(
+            "SELECT id, name, default_price, category FROM catalog_items ORDER BY name"
+        ).fetchall()
 
         if request.method == "POST":
             day_number = int(request.form.get("day_number", 0))
@@ -107,37 +105,22 @@ def create_app() -> Flask:
 
             log_id = upsert_daily_log(db, day_number, meal_type, log_date)
 
-            db.execute(
-                "DELETE FROM order_consumers WHERE order_id IN (SELECT id FROM orders WHERE daily_log_id = ?)",
-                (log_id,),
-            )
+            db.execute("DELETE FROM order_consumers WHERE order_id IN (SELECT id FROM orders WHERE daily_log_id = ?)", (log_id,))
             db.execute("DELETE FROM orders WHERE daily_log_id = ?", (log_id,))
 
-            inserted_count = 0
             for item in orders:
                 try:
-                    item_name = str(item["item_name"]).strip()
+                    item_name = item["item_name"].strip()
                     actual_price = float(item["actual_price"])
                     payer_user_id = int(item["payer_user_id"])
-                    split_type = str(item["split_type"])
+                    split_type = item["split_type"]
                     consumer_ids = [int(x) for x in item["consumer_ids"]]
-                    catalog_item_id = (
-                        int(item["catalog_item_id"])
-                        if item.get("catalog_item_id")
-                        else None
-                    )
+                    catalog_item_id = int(item["catalog_item_id"]) if item.get("catalog_item_id") else None
                 except (KeyError, TypeError, ValueError):
                     continue
 
-                if split_type not in {"equal", "individual"}:
-                    continue
                 if not item_name or actual_price <= 0 or not consumer_ids:
                     continue
-
-                if split_type == "individual":
-                    consumer_ids = [consumer_ids[0]]
-                else:
-                    consumer_ids = sorted(set(consumer_ids))
 
                 order_cursor = db.execute(
                     """
@@ -147,6 +130,9 @@ def create_app() -> Flask:
                     (log_id, catalog_item_id, item_name, actual_price, payer_user_id),
                 )
                 order_id = order_cursor.lastrowid
+
+                if split_type == "individual":
+                    consumer_ids = [consumer_ids[0]]
 
                 share = round(actual_price / len(consumer_ids), 2)
                 remainder = round(actual_price - (share * len(consumer_ids)), 2)
@@ -161,13 +147,7 @@ def create_app() -> Flask:
                         (order_id, consumer_id, user_share),
                     )
 
-                inserted_count += 1
-
             db.commit()
-            if inserted_count == 0:
-                flash("No valid item rows were submitted.", "danger")
-                return redirect(url_for("new_log"))
-
             flash("Meal log saved successfully.", "success")
             return redirect(url_for("dashboard"))
 
@@ -290,10 +270,6 @@ def get_db() -> sqlite3.Connection:
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
-
-
-def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
-    return [dict(row) for row in rows]
 
 
 def get_user_id_by_name(db: sqlite3.Connection, name: str) -> int:
