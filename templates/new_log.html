@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% block title %}Add Meal Expense | Ramadan Split{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+  <h4 class="mb-3">Add Meal Expense</h4>
+  <form method="post" id="logForm">
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <label class="form-label">Ramadan Day</label>
+        <input type="number" min="1" max="30" name="day_number" class="form-control" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Meal Type</label>
+        <select name="meal_type" class="form-select" required>
+          <option value="">Select...</option>
+          {% for meal in meal_types %}
+            <option value="{{ meal }}">{{ meal }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Date</label>
+        <input type="date" name="log_date" class="form-control" required>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0">Items & Split</h5>
+      <button type="button" class="btn btn-outline-success btn-sm" id="addRowBtn">+ Add Item</button>
+    </div>
+
+    <div id="rowsContainer" class="d-flex flex-column gap-3"></div>
+    <input type="hidden" name="orders_payload" id="ordersPayload">
+
+    <div class="mt-4 d-grid d-md-flex justify-content-md-end">
+      <button type="submit" class="btn btn-success">Save Meal Log</button>
+    </div>
+  </form>
+</div>
+
+<script type="application/json" id="catalog-data">{{ catalog_items|tojson }}</script>
+<script type="application/json" id="users-data">{{ users|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const catalog = JSON.parse(document.getElementById('catalog-data').textContent);
+const users = JSON.parse(document.getElementById('users-data').textContent);
+const rowsContainer = document.getElementById('rowsContainer');
+const ordersPayloadInput = document.getElementById('ordersPayload');
+
+function userOptions(selected = null) {
+  return users.map(u => `<option value="${u.id}" ${selected == u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+}
+
+function catalogOptions() {
+  return '<option value="">Select catalog item...</option>' +
+    catalog.map(i => `<option value="${i.id}" data-name="${i.name}" data-price="${i.default_price}">${i.name} (${i.category})</option>`).join('');
+}
+
+function makeRow() {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'card p-3';
+  wrapper.innerHTML = `
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label">Item Source</label>
+        <select class="form-select source-select">
+          <option value="catalog">From Catalog</option>
+          <option value="custom">Custom Item</option>
+        </select>
+      </div>
+      <div class="col-md-4 catalog-group">
+        <label class="form-label">Catalog Item</label>
+        <select class="form-select catalog-select">${catalogOptions()}</select>
+      </div>
+      <div class="col-md-4 custom-group d-none">
+        <label class="form-label">Custom Item Name</label>
+        <input type="text" class="form-control custom-name" placeholder="e.g., Fruit Chaat">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Actual Price (Rs)</label>
+        <input type="number" min="0" step="0.01" class="form-control price-input" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Paid By</label>
+        <select class="form-select payer-select">${userOptions(1)}</select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Split Type</label>
+        <select class="form-select split-select">
+          <option value="equal">Shared Equally</option>
+          <option value="individual">Individual</option>
+        </select>
+      </div>
+      <div class="col-12 consumers-wrap">
+        <label class="form-label">Consumers</label>
+        <div class="consumers-list d-flex flex-wrap gap-3"></div>
+      </div>
+      <div class="col-12 text-end">
+        <button type="button" class="btn btn-outline-danger btn-sm remove-row">Remove Item</button>
+      </div>
+    </div>
+  `;
+
+  const sourceSelect = wrapper.querySelector('.source-select');
+  const catalogGroup = wrapper.querySelector('.catalog-group');
+  const customGroup = wrapper.querySelector('.custom-group');
+  const catalogSelect = wrapper.querySelector('.catalog-select');
+  const priceInput = wrapper.querySelector('.price-input');
+  const splitSelect = wrapper.querySelector('.split-select');
+  const consumersList = wrapper.querySelector('.consumers-list');
+
+  function renderConsumers() {
+    const isIndividual = splitSelect.value === 'individual';
+    consumersList.innerHTML = users.map((u, idx) => `
+      <div class="form-check">
+        <input class="form-check-input consumer-check" type="${isIndividual ? 'radio' : 'checkbox'}" name="consumer_${Date.now()}" value="${u.id}" ${idx === 0 ? 'checked' : ''}>
+        <label class="form-check-label">${u.name}</label>
+      </div>
+    `).join('');
+  }
+
+  sourceSelect.addEventListener('change', () => {
+    const fromCatalog = sourceSelect.value === 'catalog';
+    catalogGroup.classList.toggle('d-none', !fromCatalog);
+    customGroup.classList.toggle('d-none', fromCatalog);
+  });
+
+  catalogSelect.addEventListener('change', () => {
+    const opt = catalogSelect.options[catalogSelect.selectedIndex];
+    if (opt && opt.dataset.price) {
+      priceInput.value = opt.dataset.price;
+    }
+  });
+
+  splitSelect.addEventListener('change', renderConsumers);
+  wrapper.querySelector('.remove-row').addEventListener('click', () => wrapper.remove());
+
+  renderConsumers();
+  rowsContainer.appendChild(wrapper);
+}
+
+document.getElementById('addRowBtn').addEventListener('click', makeRow);
+makeRow();
+
+function collectRows() {
+  const rows = [...rowsContainer.querySelectorAll('.card')];
+  return rows.map(row => {
+    const source = row.querySelector('.source-select').value;
+    const catalogSelect = row.querySelector('.catalog-select');
+    const selectedCatalogId = catalogSelect.value || null;
+
+    const itemName = source === 'catalog'
+      ? (catalogSelect.options[catalogSelect.selectedIndex]?.dataset?.name || '')
+      : row.querySelector('.custom-name').value.trim();
+
+    const selectedConsumers = [...row.querySelectorAll('.consumer-check:checked')].map(el => Number(el.value));
+
+    return {
+      catalog_item_id: selectedCatalogId,
+      item_name: itemName,
+      actual_price: Number(row.querySelector('.price-input').value || 0),
+      payer_user_id: Number(row.querySelector('.payer-select').value),
+      split_type: row.querySelector('.split-select').value,
+      consumer_ids: selectedConsumers,
+    };
+  }).filter(item => item.item_name && item.actual_price > 0 && item.consumer_ids.length > 0);
+}
+
+document.getElementById('logForm').addEventListener('submit', (event) => {
+  const payload = collectRows();
+  if (payload.length === 0) {
+    event.preventDefault();
+    alert('Please add at least one valid item with price and consumer assignment.');
+    return;
+  }
+  ordersPayloadInput.value = JSON.stringify(payload);
+});
+</script>
+{% endblock %}
